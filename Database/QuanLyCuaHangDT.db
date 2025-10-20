@@ -1,0 +1,392 @@
+-- 1. Tạo cơ sở dữ liệu
+IF DB_ID('QuanLyCuaHangDT') IS NULL
+BEGIN
+    CREATE DATABASE QuanLyCuaHangDT
+    COLLATE SQL_Latin1_General_CP1_CI_AS; -- bạn có thể đổi collation nếu cần NVARCHAR
+END
+GO
+
+USE QuanLyCuaHangDT;
+GO
+
+-- 2. Bảng PhanQuyen
+CREATE TABLE PhanQuyen (
+    MaQuyen INT IDENTITY(1,1) PRIMARY KEY,
+    TenQuyen NVARCHAR(50) NOT NULL -- Admin, NhanVien, KhachHang
+);
+GO
+
+-- 3. Bảng TaiKhoan
+CREATE TABLE TaiKhoan (
+    MaTK INT IDENTITY(1,1) PRIMARY KEY,
+    TenDangNhap NVARCHAR(50) NOT NULL UNIQUE,
+    MatKhauHash NVARCHAR(256) NOT NULL, -- lưu hash mật khẩu
+    HoTen NVARCHAR(200),
+    Email NVARCHAR(200),
+    DienThoai NVARCHAR(50),
+    MaQuyen INT NOT NULL REFERENCES PhanQuyen(MaQuyen),
+    Is2FAEnabled BIT DEFAULT 0,
+    Secret2FA NVARCHAR(200) NULL, -- lưu secret cho 2FA (nếu dùng)
+    NgayTao DATETIME DEFAULT GETDATE(),
+    TrangThai BIT DEFAULT 1 -- 1 = hoạt động, 0 = bị khoá
+);
+GO
+
+-- 4. Bảng NhaCungCap
+CREATE TABLE NhaCungCap (
+    MaNCC INT IDENTITY(1,1) PRIMARY KEY,
+    TenNCC NVARCHAR(200) NOT NULL,
+    DiaChi NVARCHAR(300),
+    Email NVARCHAR(200),
+    DienThoai NVARCHAR(50),
+    GhiChu NVARCHAR(500)
+);
+GO
+
+-- 5. Bảng HangSanXuat (Thương hiệu)
+CREATE TABLE HangSanXuat (
+    MaHang INT IDENTITY(1,1) PRIMARY KEY,
+    TenHang NVARCHAR(100) NOT NULL
+);
+GO
+
+-- 6. Bảng LoaiSanPham
+CREATE TABLE LoaiSanPham (
+    MaLoai INT IDENTITY(1,1) PRIMARY KEY,
+    TenLoai NVARCHAR(100) NOT NULL
+);
+GO
+
+-- 7. Bảng SanPham
+CREATE TABLE SanPham (
+    MaSP INT IDENTITY(1,1) PRIMARY KEY,
+    MaHang INT NULL REFERENCES HangSanXuat(MaHang),
+    MaLoai INT NULL REFERENCES LoaiSanPham(MaLoai),
+    TenSP NVARCHAR(250) NOT NULL,
+    GiaBan DECIMAL(18,2) NOT NULL DEFAULT 0,
+    GiaNhap DECIMAL(18,2) NOT NULL DEFAULT 0,
+    SoLuongTon INT NOT NULL DEFAULT 0,
+    CauHinh NVARCHAR(MAX),
+    MauSac NVARCHAR(100),
+    HinhAnh NVARCHAR(500) NULL, -- đường dẫn hoặc tên file
+    TrangThai BIT DEFAULT 1 -- 1 = đang bán, 0 = ngừng bán
+);
+GO
+
+-- 8. Bảng KhachHang
+CREATE TABLE KhachHang (
+    MaKH INT IDENTITY(1,1) PRIMARY KEY,
+    HoTen NVARCHAR(200) NOT NULL,
+    Email NVARCHAR(200),
+    DienThoai NVARCHAR(50),
+    DiaChi NVARCHAR(300),
+    DiemTichLuy INT DEFAULT 0,
+    HangThanhVien NVARCHAR(50) DEFAULT N'Thân thiết' -- Thân thiết, VIP, ...
+);
+GO
+
+-- 9. Bảng NhanVien
+CREATE TABLE NhanVien (
+    MaNV INT IDENTITY(1,1) PRIMARY KEY,
+    MaTK INT NULL REFERENCES TaiKhoan(MaTK),
+    HoTen NVARCHAR(200) NOT NULL,
+    NgaySinh DATE NULL,
+    DienThoai NVARCHAR(50),
+    DiaChi NVARCHAR(300),
+    ChucVu NVARCHAR(100),
+    LuongCoBan DECIMAL(18,2) DEFAULT 0,
+    TrangThai BIT DEFAULT 1
+);
+GO
+
+-- 10. Bảng PhieuNhap (phiếu nhập hàng từ nhà cung cấp)
+CREATE TABLE PhieuNhap (
+    MaPN INT IDENTITY(1,1) PRIMARY KEY,
+    MaNCC INT NOT NULL REFERENCES NhaCungCap(MaNCC),
+    MaNV INT NULL REFERENCES NhanVien(MaNV),
+    NgayNhap DATETIME DEFAULT GETDATE(),
+    TongTien DECIMAL(18,2) DEFAULT 0,
+    GhiChu NVARCHAR(500)
+);
+GO
+
+-- 11. Bảng ChiTietPhieuNhap
+CREATE TABLE ChiTietPhieuNhap (
+    MaCTPN INT IDENTITY(1,1) PRIMARY KEY,
+    MaPN INT NOT NULL REFERENCES PhieuNhap(MaPN) ON DELETE CASCADE,
+    MaSP INT NOT NULL REFERENCES SanPham(MaSP),
+    SoLuong INT NOT NULL,
+    DonGia DECIMAL(18,2) NOT NULL,
+    ThanhTien AS (SoLuong * DonGia) PERSISTED
+);
+GO
+
+-- 12. Bảng HoaDon (bán hàng)
+CREATE TABLE HoaDon (
+    MaHD INT IDENTITY(1,1) PRIMARY KEY,
+    MaKH INT NULL REFERENCES KhachHang(MaKH),
+    MaNV INT NULL REFERENCES NhanVien(MaNV),
+    NgayBan DATETIME DEFAULT GETDATE(),
+    TongTien DECIMAL(18,2) DEFAULT 0,
+    Thue DECIMAL(18,2) DEFAULT 0,
+    ChietKhau DECIMAL(18,2) DEFAULT 0,
+    HinhThucThanhToan NVARCHAR(50) DEFAULT N'Tiền mặt', -- Tiền mặt, CK, Momo...
+    GhiChu NVARCHAR(500)
+);
+GO
+
+-- 13. Bảng ChiTietHoaDon
+CREATE TABLE ChiTietHoaDon (
+    MaCTHD INT IDENTITY(1,1) PRIMARY KEY,
+    MaHD INT NOT NULL REFERENCES HoaDon(MaHD) ON DELETE CASCADE,
+    MaSP INT NOT NULL REFERENCES SanPham(MaSP),
+    SoLuong INT NOT NULL,
+    DonGia DECIMAL(18,2) NOT NULL,
+    ThanhTien AS (SoLuong * DonGia) PERSISTED
+);
+GO
+
+-- 14. Bảng BaoHanh (quản lý bảo hành)
+CREATE TABLE BaoHanh (
+    MaBH INT IDENTITY(1,1) PRIMARY KEY,
+    MaHD INT NULL REFERENCES HoaDon(MaHD),
+    MaSP INT NULL REFERENCES SanPham(MaSP),
+    MaKH INT NULL REFERENCES KhachHang(MaKH),
+    NgayBatDau DATETIME,
+    NgayHetHan DATETIME,
+    GhiChu NVARCHAR(500)
+);
+GO
+
+-- 15. Bảng LichSuDoiTra (đổi trả / bảo hành)
+CREATE TABLE LichSuDoiTra (
+    MaLS INT IDENTITY(1,1) PRIMARY KEY,
+    MaHD INT NULL REFERENCES HoaDon(MaHD),
+    MaSP INT NULL REFERENCES SanPham(MaSP),
+    MaNV INT NULL REFERENCES NhanVien(MaNV),
+    Loai NVARCHAR(50), -- Doi, Tra, BaoHanh
+    NgayThucHien DATETIME DEFAULT GETDATE(),
+    GhiChu NVARCHAR(500)
+);
+GO
+
+-- 16. Indexes bổ sung
+CREATE INDEX IX_SanPham_TenSP ON SanPham(TenSP);
+CREATE INDEX IX_HoaDon_NgayBan ON HoaDon(NgayBan);
+CREATE INDEX IX_PhieuNhap_NgayNhap ON PhieuNhap(NgayNhap);
+GO
+-- Trigger sau khi chèn chi tiết phiếu nhập: tăng tồn kho
+IF OBJECT_ID('TRG_UpdateTonKho_AfterNhap','TR') IS NOT NULL
+    DROP TRIGGER TRG_UpdateTonKho_AfterNhap;
+GO
+
+CREATE TRIGGER TRG_UpdateTonKho_AfterNhap
+ON ChiTietPhieuNhap
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    UPDATE sp
+    SET SoLuongTon = SoLuongTon + i.SoLuong
+    FROM SanPham sp
+    INNER JOIN inserted i ON sp.MaSP = i.MaSP;
+END;
+GO
+
+-- Trigger sau khi chèn chi tiết hóa đơn: giảm tồn kho, và ngăn bán khi không đủ
+IF OBJECT_ID('TRG_UpdateTonKho_AfterSale','TR') IS NOT NULL
+    DROP TRIGGER TRG_UpdateTonKho_AfterSale;
+GO
+
+CREATE TRIGGER TRG_UpdateTonKho_AfterSale
+ON ChiTietHoaDon
+AFTER INSERT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Kiểm tra tồn kho: nếu có sản phẩm khiến tồn < 0 thì rollback và báo lỗi
+    IF EXISTS (
+        SELECT 1
+        FROM inserted i
+        JOIN SanPham sp ON sp.MaSP = i.MaSP
+        WHERE sp.SoLuongTon - i.SoLuong < 0
+    )
+    BEGIN
+        RAISERROR('So luong ton kho khong du de ban. Giao dich bi huy.',16,1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
+
+    -- Nếu đủ, cập nhật tồn kho
+    UPDATE sp
+    SET SoLuongTon = SoLuongTon - i.SoLuong
+    FROM SanPham sp
+    INNER JOIN inserted i ON sp.MaSP = i.MaSP;
+END;
+GO
+-- 1. Thêm phiếu nhập + chi tiết (ví dụ mẫu: thêm phiếu nhập và details trong cùng 1 transaction)
+IF OBJECT_ID('sp_ThemPhieuNhap','P') IS NOT NULL
+    DROP PROCEDURE sp_ThemPhieuNhap;
+GO
+CREATE PROCEDURE sp_ThemPhieuNhap
+    @MaNCC INT,
+    @MaNV INT = NULL,
+    @NgayNhap DATETIME = NULL,
+    @GhiChu NVARCHAR(500) = NULL,
+    @CT XML -- XML chứa list chi tiết: <rows><r MaSP="1" SoLuong="10" DonGia="500" /></rows>
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+
+    IF @NgayNhap IS NULL SET @NgayNhap = GETDATE();
+
+    INSERT INTO PhieuNhap(MaNCC, MaNV, NgayNhap, GhiChu)
+    VALUES(@MaNCC, @MaNV, @NgayNhap, @GhiChu);
+
+    DECLARE @MaPN INT = SCOPE_IDENTITY();
+
+    -- Insert chi tiết từ XML
+    INSERT INTO ChiTietPhieuNhap(MaPN, MaSP, SoLuong, DonGia)
+    SELECT
+        @MaPN,
+        x.value('@MaSP','INT'),
+        x.value('@SoLuong','INT'),
+        x.value('@DonGia','DECIMAL(18,2)')
+    FROM @CT.nodes('/rows/r') as T(x);
+
+    -- Cập nhật tổng tiền PhieuNhap
+    UPDATE PhieuNhap
+    SET TongTien = (SELECT ISNULL(SUM(SoLuong * DonGia),0) FROM ChiTietPhieuNhap WHERE MaPN = @MaPN)
+    WHERE MaPN = @MaPN;
+
+    COMMIT TRAN;
+END;
+GO
+
+-- 2. Thêm hóa đơn bán hàng + chi tiết
+IF OBJECT_ID('sp_ThemHoaDon','P') IS NOT NULL
+    DROP PROCEDURE sp_ThemHoaDon;
+GO
+CREATE PROCEDURE sp_ThemHoaDon
+    @MaKH INT = NULL,
+    @MaNV INT = NULL,
+    @NgayBan DATETIME = NULL,
+    @Thue DECIMAL(18,2) = 0,
+    @ChietKhau DECIMAL(18,2) = 0,
+    @HinhThucThanhToan NVARCHAR(50) = N'Tien mat',
+    @GhiChu NVARCHAR(500) = NULL,
+    @CT XML -- <rows><r MaSP="1" SoLuong="1" DonGia="1000" /></rows>
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+    BEGIN TRAN;
+
+    IF @NgayBan IS NULL SET @NgayBan = GETDATE();
+
+    INSERT INTO HoaDon(MaKH, MaNV, NgayBan, Thue, ChietKhau, HinhThucThanhToan, GhiChu)
+    VALUES(@MaKH, @MaNV, @NgayBan, @Thue, @ChietKhau, @HinhThucThanhToan, @GhiChu);
+
+    DECLARE @MaHD INT = SCOPE_IDENTITY();
+
+    -- Insert chi tiết
+    INSERT INTO ChiTietHoaDon(MaHD, MaSP, SoLuong, DonGia)
+    SELECT
+        @MaHD,
+        x.value('@MaSP','INT'),
+        x.value('@SoLuong','INT'),
+        x.value('@DonGia','DECIMAL(18,2)')
+    FROM @CT.nodes('/rows/r') as T(x);
+
+    -- Cập nhật tổng tiền (trước thuế/chietkhau)
+    UPDATE HoaDon
+    SET TongTien = (SELECT ISNULL(SUM(SoLuong * DonGia),0) FROM ChiTietHoaDon WHERE MaHD = @MaHD)
+    WHERE MaHD = @MaHD;
+
+    -- Lưu ý: Trigger sẽ tự trừ tồn kho; nếu tồn không đủ, PROCEDURE sẽ bị rollback do trigger RAISERROR
+
+    COMMIT TRAN;
+END;
+GO
+-- Doanh thu theo ngày
+CREATE VIEW vw_DoanhThuTheoNgay
+AS
+SELECT
+    CONVERT(date, NgayBan) AS Ngay,
+    COUNT(DISTINCT MaHD) AS SoHoaDon,
+    SUM(ISNULL(TH.Tong,0)) AS TongDoanhThu
+FROM
+    (SELECT MaHD, NgayBan, TongTien - ChietKhau + Thue AS Tong FROM HoaDon) TH
+GROUP BY CONVERT(date, NgayBan);
+GO
+
+-- Sản phẩm bán chạy
+-- Sản phẩm bán chạy (bỏ ORDER BY khỏi VIEW)
+IF OBJECT_ID('vw_SanPhamBanChay','V') IS NOT NULL
+    DROP VIEW vw_SanPhamBanChay;
+GO
+
+CREATE VIEW vw_SanPhamBanChay
+AS
+SELECT 
+    sp.MaSP, 
+    sp.TenSP, 
+    SUM(ct.SoLuong) AS TongBan
+FROM ChiTietHoaDon ct
+JOIN SanPham sp ON sp.MaSP = ct.MaSP
+GROUP BY sp.MaSP, sp.TenSP;
+GO
+
+-- Phân quyền
+INSERT INTO PhanQuyen (TenQuyen) VALUES (N'Admin'), (N'NhanVien'), (N'KhachHang');
+
+-- Tạo tài khoản mẫu (lưu ý: MatKhauHash ở đây chỉ là ví dụ; trong thực tế bạn lưu hash bằng bcrypt/sha512+salt)
+INSERT INTO TaiKhoan (TenDangNhap, MatKhauHash, HoTen, Email, DienThoai, MaQuyen, Is2FAEnabled)
+VALUES
+(N'admin', N'HashMatKhauAdmin', N'Administrator', N'admin@store.com', N'0123456789', 1, 1),
+(N'nhanvien1', N'HashMatKhauNV', N'Nguyen Van A', N'nv1@store.com', N'0987654321', 2, 0);
+
+-- Nhà cung cấp
+INSERT INTO NhaCungCap (TenNCC, DiaChi, Email, DienThoai) VALUES
+(N'Cty ABC Mobile', N'123 Đường A, Q1', N'abc@nc.com', N'0912345678'),
+(N'Cty XYZ Tech', N'456 Đường B, Q3', N'xyz@nc.com', N'0987123456');
+
+-- Hãng
+INSERT INTO HangSanXuat (TenHang) VALUES (N'Apple'), (N'Samsung'), (N'Xiaomi');
+
+-- Loại
+INSERT INTO LoaiSanPham (TenLoai) VALUES (N'Smartphone'), (N'Phụ kiện');
+
+-- Sản phẩm mẫu
+INSERT INTO SanPham (MaHang, MaLoai, TenSP, GiaBan, GiaNhap, SoLuongTon, CauHinh, MauSac)
+VALUES
+(1,1,N'iPhone 14 128GB', 24900000, 20000000, 10, N'Chip A15, RAM 6GB', N'Den'),
+(2,1,N'Samsung Galaxy S22', 17900000, 15000000, 15, N'Chip Exynos, RAM 8GB', N'Bac'),
+(3,1,N'Xiaomi Redmi Note 12', 4990000, 4000000, 20, N'Chip Snapdragon, RAM 6GB', N'Xanh');
+
+-- Khách hàng mẫu
+INSERT INTO KhachHang (HoTen, Email, DienThoai, DiaChi) VALUES
+(N'Le Thi B', N'b@kh.com', N'0911222333', N'45 Đường C'),
+(N'Pham Van C', N'c@kh.com', N'0909876543', N'12 Đường D');
+
+-- Nhân viên mẫu
+INSERT INTO NhanVien (MaTK, HoTen, DienThoai, ChucVu, LuongCoBan)
+VALUES (2, N'Nguyen Van A', N'0987654321', N'NV Ban Hang', 7000000);
+
+-- Tạo một phiếu nhập mẫu bằng SP
+DECLARE @xmlNhap XML = '<rows>
+    <r MaSP="1" SoLuong="5" DonGia="20000000" />
+    <r MaSP="3" SoLuong="10" DonGia="4000000" />
+</rows>';
+EXEC sp_ThemPhieuNhap @MaNCC = 1, @MaNV = 1, @CT = @xmlNhap;
+
+-- Tạo 1 hóa đơn bán (mua 1 iPhone, 2 Xiaomi)
+DECLARE @xmlHD XML = '<rows>
+    <r MaSP="1" SoLuong="1" DonGia="24900000" />
+    <r MaSP="3" SoLuong="2" DonGia="4990000" />
+</rows>';
+EXEC sp_ThemHoaDon @MaKH = 1, @MaNV = 1, @CT = @xmlHD, @Thue = 0, @ChietKhau = 0;
+GO
